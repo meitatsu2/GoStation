@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gogoro Radar Pro v16.0</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        /* Requirement: 14pt Font and Mobile Layout */
+        * { font-size: 14pt; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #121212; color: white; margin: 0; padding: 0; }
+
+        .ribbon { background: #2c3e50; height: 50px; display: flex; align-items: center; padding: 0 10px; border-bottom: 2px solid #34495e; }
+        .menu-item { position: relative; }
+        .menu-btn { background: none; border: none; color: white; padding: 10px; cursor: pointer; }
+        .dropdown { display: none; position: absolute; background: white; min-width: 320px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 100; border-radius: 0 0 5px 5px; }
+        .dropdown button { color: black; padding: 15px; width: 100%; text-align: left; border: none; background: none; border-bottom: 1px solid #ddd; cursor: pointer; }
+        .menu-item:hover .dropdown { display: block; }
+
+        /* GPS Status */
+        .gps-status { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; height: 22px; padding-right: 15px; }
+        .bar { width: 5px; background: #555; border-radius: 1px; }
+        .lvl3 .bar1, .lvl3 .bar2, .lvl3 .bar3 { background: #2ecc71; }
+        .lvl4 .bar { background: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
+
+        /* Requirement 4: Radar Display */
+        #radar-container { background: #000; display: flex; justify-content: center; padding: 10px 0; border-bottom: 1px solid #333; }
+        #radarCanvas { background: #000; border-radius: 50%; border: 1px solid #1a5a1a; }
+
+        .controls { background: #1a1a1a; padding: 15px; display: flex; gap: 10px; }
+        .btn { padding: 12px; border-radius: 6px; border: none; font-weight: bold; flex: 1; cursor: pointer; }
+        #btnGo { background: #34495e; color: #7f8c8d; }
+        #btnStop { background: #c0392b; color: white; display: none; }
+        .ready { background: #2ecc71 !important; color: black !important; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 10px; border-bottom: 1px solid #333; text-align: left; }
+        th { color: #2ecc71; font-size: 11pt; background: #1a1a1a; }
+        td { font-size: 13pt; }
+        
+        #debug-msg { padding: 5px; font-size: 10pt; color: #f1c40f; text-align: center; background: #222; }
+    </style>
+</head>
+<body>
+
+    <div class="ribbon">
+        <div class="menu-item">
+            <button class="menu-btn">File ☰</button>
+            <div class="dropdown">
+                <button onclick="document.getElementById('xlsxIn').click()">Import XLSX Address List</button>
+                <button onclick="document.getElementById('csvIn').click()">Import Processed Coordinates (CSV)</button>
+                <button onclick="exportCSV()">Export Processed Coordinates (CSV)</button>
+                <button onclick="clearAll()">Reset System</button>
+            </div>
+        </div>
+        <div id="gps-ui" class="gps-status"><div class="bar bar1"></div><div class="bar bar2"></div><div class="bar bar3"></div><div class="bar bar4"></div></div>
+    </div>
+
+    <div id="debug-msg">GPS Standby</div>
+
+    <div id="radar-container">
+        <canvas id="radarCanvas" width="300" height="300"></canvas>
+    </div>
+
+    <div class="controls">
+        <button id="btnGo" class="btn" onclick="startTracking()">GO</button>
+        <button id="btnStop" class="btn" onclick="stopTracking()">STOP</button>
+    </div>
+
+    <input type="file" id="xlsxIn" hidden accept=".xlsx">
+    <input type="file" id="csvIn" hidden accept=".csv, text/csv" onchange="handleCSV(this)">
+
+    <table>
+        <thead><tr><th>GoStation Name</th><th>Distance</th></tr></thead>
+        <tbody id="list-body"></tbody>
+    </table>
+
+    <script>
+        let gostations = [];
+        let timer = null, stopTimer = null, wakeLock = null;
+        let myPos = null;
+        const canvas = document.getElementById('radarCanvas');
+        const ctx = canvas.getContext('2d');
+        const MAX_RANGE = 5000; // 5000m
+        const FADE_TIME = 9000; // 9s fade out
+
+        window.onload = () => {
+            const saved = localStorage.getItem('gostation_db_v16');
+            if (saved) { gostations = JSON.parse(saved); document.getElementById('btnGo').classList.add('ready'); }
+            drawRadarFrame();
+        };
+
+        // Requirement 4 & 5: Draw Static Radar Rings (North Up)
+        function drawRadarFrame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = "#1a5a1a";
+            ctx.lineWidth = 1;
+            const center = canvas.width / 2;
+
+            // Circles per 500m
+            for (let i = 1; i <= 10; i++) {
+                ctx.beginPath();
+                ctx.arc(center, center, (center / 10) * i, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            // Crosshairs
+            ctx.beginPath(); ctx.moveTo(center, 0); ctx.lineTo(center, canvas.height); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, center); ctx.lineTo(canvas.width, center); ctx.stroke();
+            
+            // Central Point (Self)
+            ctx.fillStyle = "#fff";
+            ctx.beginPath(); ctx.arc(center, center, 4, 0, Math.PI * 2); ctx.fill();
+        }
+
+        async function startTracking() {
+            if (!gostations.length) return alert("Load data first.");
+            document.getElementById('btnGo').style.display = 'none';
+            document.getElementById('btnStop').style.display = 'block';
+
+            if ('wakeLock' in navigator) try { wakeLock = await navigator.wakeLock.request('screen'); } catch(e){}
+
+            timer = setInterval(() => {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    myPos = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+                    updateGPSUI(pos.coords.accuracy);
+                    processData();
+                }, null, { enableHighAccuracy: true });
+            }, 3000); // Requirement 7: 3s update
+
+            stopTimer = setTimeout(() => { speak("Go Station Radar Terminated"); stopTracking(); }, 10800000); // 3 hrs
+        }
+
+        function stopTracking() {
+            clearInterval(timer); clearTimeout(stopTimer);
+            if (wakeLock) wakeLock.release();
+            document.getElementById('btnGo').style.display = 'block';
+            document.getElementById('btnStop').style.display = 'none';
+            document.getElementById('gps-ui').className = "gps-status";
+            drawRadarFrame();
+        }
+
+        function processData() {
+            if (!myPos) return;
+            drawRadarFrame();
+            
+            gostations.forEach(s => {
+                const R = 6371000;
+                const dLat = (s.lat - myPos.lat) * Math.PI / 180;
+                const dLon = (s.lon - myPos.lon) * Math.PI / 180;
+                const a = Math.sin(dLat / 2) ** 2 + Math.cos(myPos.lat * Math.PI / 180) * Math.cos(s.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+                s.d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+                // Requirement 6 & 7: Draw if within 5000m
+                if (s.d <= MAX_RANGE) {
+                    drawStationOnRadar(s);
+                }
+            });
+
+            gostations.sort((a, b) => a.d - b.d);
+            document.getElementById('list-body').innerHTML = gostations.slice(0, 10).map(s => `<tr><td>${s.name}</td><td>${Math.round(s.d)}m ${s.d <= 500 ? '🔊' : ''}</td></tr>`).join('');
+            
+            if (gostations[0].d <= 500) speak("Approaching a Go Station");
+        }
+
+        // Requirement 7: Draw Point with fading logic handled by canvas refresh interval
+        function drawStationOnRadar(s) {
+            const center = canvas.width / 2;
+            const scale = center / MAX_RANGE;
+
+            // North Up Calculation
+            // Latitude is Y (North is up), Longitude is X
+            const xDist = (s.lon - myPos.lon) * 111320 * Math.cos(myPos.lat * Math.PI / 180);
+            const yDist = (s.lat - myPos.lat) * 110540;
+
+            const canvasX = center + (xDist * scale);
+            const canvasY = center - (yDist * scale);
+
+            ctx.fillStyle = "#2ecc71";
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "#2ecc71";
+            ctx.beginPath(); ctx.arc(canvasX, canvasY, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.shadowBlur = 0; // Reset for rings
+        }
+
+        function updateGPSUI(acc) {
+            const ui = document.getElementById('gps-ui');
+            const debug = document.getElementById('debug-msg');
+            ui.className = "gps-status " + (acc < 20 ? 'lvl4' : 'lvl3');
+            debug.innerText = `Accuracy: ±${Math.round(acc)}m`;
+        }
+
+        function speak(t) { window.speechSynthesis.speak(new SpeechSynthesisUtterance(t)); }
+        
+        function handleCSV(input) {
+            const r = new FileReader();
+            r.onload = (e) => {
+                const lines = e.target.result.split(/\r?\n/);
+                let temp = [];
+                for (let i = 1; i < lines.length; i++) {
+                    const p = lines[i].split(',');
+                    if (p.length >= 3) temp.push({ name: p[0].replace(/"/g, '').trim(), lat: parseFloat(p[1]), lon: parseFloat(p[2]) });
+                }
+                gostations = temp;
+                localStorage.setItem('gostation_db_v16', JSON.stringify(temp));
+                location.reload();
+            };
+            r.readAsText(input.files[0]);
+        }
+        function exportCSV() {
+            let c = "Name,Lat,Lon\n" + gostations.map(s => `"${s.name}",${s.lat},${s.lon}`).join("\n");
+            const b = new Blob([c], {type: 'text/csv'});
+            const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'gostations.csv'; a.click();
+        }
+        function clearAll() { localStorage.clear(); location.reload(); }
+    </script>
+</body>
+</html>
