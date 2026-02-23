@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gogoro Radar Pro v15.0</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        /* Requirement: 14pt Font and Mobile Layout */
+        * { font-size: 14pt; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #121212; color: white; margin: 0; padding: 0; }
+
+        .ribbon { background: #2c3e50; height: 50px; display: flex; align-items: center; padding: 0 10px; border-bottom: 2px solid #34495e; }
+        .menu-item { position: relative; }
+        .menu-btn { background: none; border: none; color: white; padding: 10px; cursor: pointer; }
+        .dropdown { display: none; position: absolute; background: white; min-width: 320px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 100; border-radius: 0 0 5px 5px; }
+        .dropdown button { color: black; padding: 15px; width: 100%; text-align: left; border: none; background: none; border-bottom: 1px solid #ddd; cursor: pointer; }
+        .menu-item:hover .dropdown { display: block; }
+
+        /* GPS Signal Meter */
+        .gps-status { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; height: 22px; padding-right: 15px; }
+        .bar { width: 5px; background: #555; border-radius: 1px; transition: background 0.2s; }
+        .bar1 { height: 7px; } .bar2 { height: 12px; } .bar3 { height: 17px; } .bar4 { height: 22px; }
+        
+        .lvl1 .bar1 { background: #e74c3c; }
+        .lvl2 .bar1, .lvl2 .bar2 { background: #f1c40f; }
+        .lvl3 .bar1, .lvl3 .bar2, .lvl3 .bar3 { background: #2ecc71; }
+        .lvl4 .bar { background: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
+
+        .controls { background: #1a1a1a; padding: 15px; display: flex; gap: 10px; border-bottom: 1px solid #333; }
+        .btn { padding: 12px; border-radius: 6px; border: none; font-weight: bold; flex: 1; cursor: pointer; }
+        #btnGo { background: #34495e; color: #7f8c8d; }
+        #btnStop { background: #c0392b; color: white; display: none; }
+        .ready { background: #2ecc71 !important; color: black !important; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+        th, td { padding: 15px 10px; border-bottom: 1px solid #333; text-align: left; }
+        th { color: #2ecc71; font-size: 11pt; background: #1a1a1a; }
+        td { font-size: 13pt; }
+        
+        #debug-msg { padding: 10px; font-size: 11pt; color: #f1c40f; text-align: center; background: #332200; display: none; }
+        
+        .footer-note { padding: 20px; font-size: 10pt; color: #555; text-align: center; line-height: 1.4; }
+    </style>
+</head>
+<body>
+
+    <div class="ribbon">
+        <div class="menu-item">
+            <button class="menu-btn">File ☰</button>
+            <div class="dropdown">
+                <button onclick="document.getElementById('xlsxIn').click()">Import XLSX Address List</button>
+                <button onclick="document.getElementById('csvIn').click()">Import Processed Coordinates (CSV)</button>
+                <button onclick="exportCSV()">Export Processed Coordinates (CSV)</button>
+                <button onclick="clearAll()">Reset System</button>
+            </div>
+        </div>
+        <div id="gps-ui" class="gps-status">
+            <div class="bar bar1"></div><div class="bar bar2"></div><div class="bar bar3"></div><div class="bar bar4"></div>
+        </div>
+    </div>
+
+    <div id="debug-msg">GPS Initializing...</div>
+
+    <div class="controls">
+        <button id="btnGo" class="btn" onclick="startTracking()">GO</button>
+        <button id="btnStop" class="btn" onclick="stopTracking()">STOP</button>
+    </div>
+
+    <input type="file" id="xlsxIn" hidden accept=".xlsx">
+    <input type="file" id="csvIn" hidden accept=".csv, text/csv" onchange="handleCSV(this)">
+
+    <table>
+        <thead><tr><th>GoStation Name</th><th>Distance</th></tr></thead>
+        <tbody id="list-body">
+            <tr><td colspan="2" style="color:#666; text-align:center; padding:40px;">No Stations Loaded</td></tr>
+        </tbody>
+    </table>
+
+    <div class="footer-note">
+        <strong>Privacy & Security Guarantee:</strong><br>
+        This application operates entirely within your browser. GPS coordinates and station data are processed locally on this mobile device and are <u>never</u> transmitted to any remote server.
+    </div>
+
+    <script>
+        let gostations = [];
+        let timer = null, stopTimer = null, wakeLock = null, hudWin = null;
+        let lastAlertName = "";
+
+        window.onload = () => {
+            const saved = localStorage.getItem('gostation_db_v15');
+            if (saved) {
+                gostations = JSON.parse(saved);
+                document.getElementById('btnGo').classList.add('ready');
+                refreshTableStatic();
+            }
+        };
+
+        function updateGPSIcon(accuracy) {
+            const ui = document.getElementById('gps-ui');
+            const debug = document.getElementById('debug-msg');
+            ui.className = "gps-status"; 
+            debug.style.display = 'block';
+            debug.innerText = `GPS Accuracy: ±${Math.round(accuracy)}m`;
+            debug.style.background = "#003311";
+
+            if (accuracy < 15) ui.classList.add('lvl4');
+            else if (accuracy < 40) ui.classList.add('lvl3');
+            else if (accuracy < 100) ui.classList.add('lvl2');
+            else ui.classList.add('lvl1');
+        }
+
+        async function startTracking() {
+            if (!gostations.length) return alert("Please load station data first.");
+            
+            // First time permission request for Server-side context
+            navigator.geolocation.getCurrentPosition(() => {
+                document.getElementById('btnGo').style.display = 'none';
+                document.getElementById('btnStop').style.display = 'block';
+                initGPSLoop();
+            }, (e) => {
+                alert("GPS Access Denied: " + e.message + "\nPlease check browser site permissions.");
+            }, { enableHighAccuracy: true });
+        }
+
+        async function initGPSLoop() {
+            if ('wakeLock' in navigator) {
+                try { wakeLock = await navigator.wakeLock.request('screen'); } catch(e) {}
+            }
+
+            timer = setInterval(() => {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    updateGPSIcon(pos.coords.accuracy); 
+                    processRadar(pos.coords.latitude, pos.coords.longitude);
+                }, (err) => {
+                    const debug = document.getElementById('debug-msg');
+                    debug.style.display = 'block';
+                    debug.style.background = "#330000";
+                    debug.innerText = `GPS Signal Lost: ${err.message}`;
+                }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
+            }, 3000);
+
+            stopTimer = setTimeout(() => {
+                speakAlert("Go Station Radar Terminated");
+                stopTracking();
+            }, 10800000);
+        }
+
+        function processRadar(lat, lon) {
+            gostations.forEach(s => {
+                const R = 6371000;
+                const dLat = (s.lat - lat) * Math.PI / 180;
+                const dLon = (s.lon - lon) * Math.PI / 180;
+                const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat * Math.PI / 180) * Math.cos(s.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+                s.d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            });
+
+            gostations.sort((a, b) => a.d - b.d);
+            const listBody = document.getElementById('list-body');
+            listBody.innerHTML = gostations.slice(0, 10).map(s => `<tr><td>${s.name}</td><td>${Math.round(s.d)}m</td></tr>`).join('');
+
+            const nearest = gostations[0];
+            if (nearest.d <= 500) {
+                renderHUD(nearest);
+            } else if (hudWin) {
+                setTimeout(() => { if (gostations[0].d > 500 && hudWin) hudWin.close(); }, 3000);
+                lastAlertName = "";
+            }
+        }
+
+        function renderHUD(s) {
+            if (!hudWin || hudWin.closed) {
+                hudWin = window.open("", "HUD", "width=350,height=300");
+                hudWin.document.write(`
+                    <body style="background:#121212;color:white;text-align:center;padding:25px;font-family:sans-serif;">
+                        <div style="font-size:18pt;color:#2ecc71;margin-bottom:15px;">${s.name}</div>
+                        <div style="width:100%;height:35px;background:#333;border-radius:18px;overflow:hidden;border:2px solid #444;">
+                            <div id="meter" style="height:100%;background:#2ecc71;transition:width 0.5s linear;"></div>
+                        </div>
+                        <div id="val" style="font-size:45pt;font-weight:bold;margin-top:20px;">500m</div>
+                    </body>
+                `);
+            }
+            const widthPct = (s.d / 500) * 100;
+            const meter = hudWin.document.getElementById('meter');
+            const val = hudWin.document.getElementById('val');
+            if (meter) meter.style.width = widthPct + "%";
+            if (val) val.innerText = Math.round(s.d) + "m";
+            if (lastAlertName !== s.name) {
+                speakAlert("Approaching a Go Station");
+                lastAlertName = s.name;
+            }
+        }
+
+        function stopTracking() {
+            clearInterval(timer); clearTimeout(stopTimer);
+            if (wakeLock) wakeLock.release();
+            if (hudWin) hudWin.close();
+            document.getElementById('gps-ui').className = "gps-status";
+            document.getElementById('debug-msg').style.display = 'none';
+            document.getElementById('btnGo').style.display = 'block';
+            document.getElementById('btnStop').style.display = 'none';
+        }
+
+        function speakAlert(txt) { window.speechSynthesis.speak(new SpeechSynthesisUtterance(txt)); }
+        function refreshTableStatic() {
+            const listBody = document.getElementById('list-body');
+            listBody.innerHTML = gostations.slice(0, 10).map(s => `<tr><td>${s.name}</td><td>--- m</td></tr>`).join('');
+        }
+        function handleCSV(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const lines = e.target.result.split(/\r?\n/); 
+                let temp = [];
+                for (let i = 1; i < lines.length; i++) {
+                    const parts = lines[i].split(',');
+                    if (parts.length >= 3) {
+                        temp.push({ name: parts[0].replace(/"/g, '').trim(), lat: parseFloat(parts[1]), lon: parseFloat(parts[2]) });
+                    }
+                }
+                gostations = temp;
+                localStorage.setItem('gostation_db_v15', JSON.stringify(gostations));
+                document.getElementById('btnGo').classList.add('ready');
+                refreshTableStatic();
+            };
+            reader.readAsText(file);
+        }
+        function exportCSV() {
+            let csv = "Name,Lat,Lon\n" + gostations.map(s => `"${s.name}",${s.lat},${s.lon}`).join("\n");
+            const blob = new Blob([csv], {type: 'text/csv'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob); a.download = 'gostations_processed.csv'; a.click();
+        }
+        function clearAll() { localStorage.clear(); location.reload(); }
+    </script>
+</body>
+</html>
