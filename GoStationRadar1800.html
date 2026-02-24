@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gogoro Radar Pro v18.0</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * { font-size: 14pt; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #121212; color: white; margin: 0; padding: 0; }
+
+        .ribbon { background: #2c3e50; height: 50px; display: flex; align-items: center; padding: 0 10px; border-bottom: 2px solid #34495e; }
+        .menu-item { position: relative; }
+        .menu-btn { background: none; border: none; color: white; padding: 10px; cursor: pointer; }
+        .dropdown { display: none; position: absolute; background: white; min-width: 320px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 100; border-radius: 0 0 5px 5px; }
+        .dropdown button { color: black; padding: 15px; width: 100%; text-align: left; border: none; background: none; border-bottom: 1px solid #ddd; cursor: pointer; }
+        .menu-item:hover .dropdown { display: block; }
+
+        /* Requirement 1: Buffer Counter UI */
+        .buffer-display { margin-left: 10px; font-size: 11pt; color: #2ecc71; white-space: nowrap; overflow: hidden; }
+
+        .gps-status { margin-left: auto; display: flex; align-items: flex-end; gap: 3px; height: 22px; padding-right: 15px; }
+        .bar { width: 5px; background: #555; border-radius: 1px; }
+        .lvl3 .bar1, .lvl3 .bar2, .lvl3 .bar3 { background: #2ecc71; }
+        .lvl4 .bar { background: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
+
+        #radar-container { background: #000; position: relative; text-align: center; padding: 10px 0; border-bottom: 1px solid #333; }
+        #radarCanvas { background: #000; border-radius: 50%; border: 1px solid #1a5a1a; }
+        .hud-label { position: absolute; color: #2ecc71; font-family: monospace; font-weight: bold; font-size: 12pt; pointer-events: none; }
+        #north-indicator { top: 20px; right: 20%; text-align: right; }
+        #scale-indicator { top: 20px; left: 20%; text-align: left; }
+
+        /* Requirement 2: Expanded Range Selection */
+        .range-panel { background: #1a1a1a; padding: 10px; text-align: center; border-bottom: 1px solid #333; }
+        #rangeSelect { background: #2c3e50; color: white; border: 1px solid #34495e; padding: 5px; width: 80%; border-radius: 5px; }
+
+        .controls { background: #1a1a1a; padding: 15px; display: flex; gap: 10px; }
+        .btn { padding: 12px; border-radius: 6px; border: none; font-weight: bold; flex: 1; cursor: pointer; }
+        #btnGo { background: #34495e; color: #7f8c8d; }
+        #btnStop { background: #c0392b; color: white; display: none; }
+        .ready { background: #2ecc71 !important; color: black !important; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 10px; border-bottom: 1px solid #333; text-align: left; }
+        th { color: #2ecc71; font-size: 11pt; }
+    </style>
+</head>
+<body>
+
+    <div class="ribbon">
+        <div class="menu-item">
+            <button class="menu-btn">File ☰</button>
+            <div class="dropdown">
+                <button onclick="document.getElementById('xlsxIn').click()">Import XLSX Address List</button>
+                <button onclick="document.getElementById('csvIn').click()">Import Processed Coordinates (CSV)</button>
+                <button onclick="exportCSV()">Export Processed Coordinates (CSV)</button>
+                <button onclick="clearAll()">Reset System</button>
+            </div>
+        </div>
+        <div id="buffer-ui" class="buffer-display">Buffer: 0 / 0</div>
+        
+        <div id="gps-ui" class="gps-status"><div class="bar bar1"></div><div class="bar bar2"></div><div class="bar bar3"></div><div class="bar bar4"></div></div>
+    </div>
+
+    <div id="radar-container">
+        <div id="scale-indicator" class="hud-label">Step: --m</div>
+        <div id="north-indicator" class="hud-label">N ↑</div>
+        <canvas id="radarCanvas" width="300" height="300"></canvas>
+    </div>
+
+    <div class="range-panel">
+        <label for="rangeSelect" style="font-size: 10pt; color: #888;">Max Radar Range: </label><br>
+        <select id="rangeSelect">
+            <option value="1000">1 km</option>
+            <option value="2000">2 km</option>
+            <option value="3000">3 km</option>
+            <option value="5000" selected>5 km</option>
+            <option value="10000">10 km</option>
+            <option value="15000">15 km</option>
+            <option value="20000">20 km</option>
+        </select>
+    </div>
+
+    <div class="controls">
+        <button id="btnGo" class="btn" onclick="startTracking()">GO</button>
+        <button id="btnStop" class="btn" onclick="stopTracking()">STOP</button>
+    </div>
+
+    <input type="file" id="xlsxIn" hidden accept=".xlsx" onchange="handleXLSX(this)">
+    <input type="file" id="csvIn" hidden accept=".csv, text/csv" onchange="handleCSV(this)">
+
+    <table>
+        <thead><tr><th>GoStation Name</th><th>Distance</th></tr></thead>
+        <tbody id="list-body"></tbody>
+    </table>
+
+    <script>
+        let gostations = [];
+        let timer = null, stopTimer = null, wakeLock = null;
+        let myPos = null;
+        let posHistory = [];
+        let lastVectorAngle = 0;
+        const canvas = document.getElementById('radarCanvas');
+        const ctx = canvas.getContext('2d');
+
+        window.onload = () => {
+            const saved = localStorage.getItem('gostation_db_v18');
+            if (saved) { 
+                gostations = JSON.parse(saved); 
+                document.getElementById('btnGo').classList.add('ready');
+                updateBufferUI(gostations.length, gostations.length);
+            }
+            drawRadar();
+        };
+
+        function updateBufferUI(current, total) {
+            document.getElementById('buffer-ui').innerText = `Buffer: ${current} / ${total}`;
+        }
+
+        function getRange() { return parseInt(document.getElementById('rangeSelect').value); }
+        function getSpacing() { return getRange() / 5; }
+
+        // Geocoding Logic strictly implemented from earlier requirements
+        async function handleXLSX(input) {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const data = new Uint8Array(e.target.result);
+                const wb = XLSX.read(data, {type: 'array'});
+                const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1});
+                
+                const headers = rows[0].map(h => String(h).toLowerCase());
+                const nIdx = headers.findIndex(h => h.includes('名稱') || h.includes('name'));
+                const aIdx = headers.findIndex(h => h.includes('地址') || h.includes('address'));
+
+                if (nIdx === -1 || aIdx === -1) return alert("Columns not detected!");
+
+                const total = rows.length - 1;
+                let tempBuffer = [...gostations];
+
+                for (let i = 1; i < rows.length; i++) {
+                    const name = rows[i][nIdx];
+                    const raw = rows[i][aIdx];
+                    if (!name || !raw || tempBuffer.some(s => s.name === name)) {
+                        updateBufferUI(tempBuffer.length, total);
+                        continue;
+                    }
+
+                    // Cleaning Logic
+                    let clean = String(raw).replace(/臺/g, "台").replace(/[（(].*?[）)]/g, "").replace(/^\d{3,5}/, "").replace(/[\d\w]{0,2}[里鄰村]/g, "").replace(/旁/g, "");
+                    if (clean.includes("號")) clean = clean.split("號")[0] + "號";
+                    clean = clean.trim();
+
+                    let coords = await geocode(clean);
+                    if (!coords) { // Fallback deep search
+                        let fallback = clean.replace(/\d+.*號/, "");
+                        coords = await geocode(fallback);
+                    }
+
+                    if (coords) {
+                        tempBuffer.push({ name, lat: coords.lat, lon: coords.lon });
+                        gostations = tempBuffer;
+                        localStorage.setItem('gostation_db_v18', JSON.stringify(gostations));
+                        document.getElementById('btnGo').classList.add('ready');
+                    }
+                    updateBufferUI(tempBuffer.length, total);
+                    await new Promise(r => setTimeout(r, 1200)); 
+                }
+            };
+            reader.readAsArrayBuffer(input.files[0]);
+        }
+
+        async function geocode(addr) {
+            try {
+                const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=tw&q=${encodeURIComponent(addr)}`);
+                const d = await r.json();
+                return d.length > 0 ? { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon) } : null;
+            } catch (e) { return null; }
+        }
+
+        // Radar Rendering Logic
+        function drawRadar() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const center = canvas.width / 2;
+            const spacing = getSpacing();
+            document.getElementById('scale-indicator').innerText = `Step: ${spacing}m`;
+
+            ctx.strokeStyle = "#1a5a1a";
+            ctx.lineWidth = 1;
+            for (let i = 1; i <= 5; i++) {
+                ctx.beginPath(); ctx.arc(center, center, (center / 5) * i, 0, Math.PI * 2); ctx.stroke();
+            }
+
+            drawVectorArrow(center);
+            ctx.beginPath(); ctx.moveTo(center, 0); ctx.lineTo(center, canvas.height); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, center); ctx.lineTo(canvas.width, center); ctx.stroke();
+        }
+
+        function drawVectorArrow(center) {
+            let angle = lastVectorAngle;
+            if (posHistory.length >= 2) {
+                const now = posHistory[posHistory.length - 1];
+                const old = posHistory[0];
+                if (now.lat !== old.lat || now.lon !== old.lon) {
+                    angle = Math.atan2(now.lon - old.lon, now.lat - old.lat);
+                    lastVectorAngle = angle;
+                }
+            }
+            ctx.save();
+            ctx.translate(center, center); ctx.rotate(angle);
+            ctx.fillStyle = "#fff";
+            ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(5, 5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill();
+            ctx.restore();
+        }
+
+        async function startTracking() {
+            if (!gostations.length) return alert("No data.");
+            document.getElementById('rangeSelect').disabled = true;
+            document.getElementById('btnGo').style.display = 'none';
+            document.getElementById('btnStop').style.display = 'block';
+
+            timer = setInterval(() => {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    myPos = { lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now() };
+                    posHistory.push(myPos);
+                    posHistory = posHistory.filter(p => p.ts >= Date.now() - 20000);
+                    updateGPSUI(pos.coords.accuracy);
+                    processFrame();
+                }, null, { enableHighAccuracy: true });
+            }, 3000);
+
+            stopTimer = setTimeout(() => { stopTracking(); speak("Go Station Radar Terminated"); }, 10800000);
+        }
+
+        function stopTracking() {
+            clearInterval(timer); clearTimeout(stopTimer);
+            document.getElementById('rangeSelect').disabled = false;
+            document.getElementById('btnGo').style.display = 'block';
+            document.getElementById('btnStop').style.display = 'none';
+            drawRadar();
+        }
+
+        function processFrame() {
+            if (!myPos) return;
+            drawRadar();
+            const range = getRange();
+            const spacing = getSpacing();
+
+            gostations.forEach(s => {
+                const R = 6371000;
+                const dLat = (s.lat - myPos.lat) * Math.PI / 180;
+                const dLon = (s.lon - myPos.lon) * Math.PI / 180;
+                const a = Math.sin(dLat/2)**2 + Math.cos(myPos.lat*Math.PI/180)*Math.cos(s.lat*Math.PI/180)*Math.sin(dLon/2)**2;
+                s.d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                if (s.d <= range) {
+                    const center = canvas.width / 2;
+                    const scale = center / range;
+                    const xDist = (s.lon - myPos.lon) * 111320 * Math.cos(myPos.lat * Math.PI / 180);
+                    const yDist = (s.lat - myPos.lat) * 110540;
+                    ctx.fillStyle = "#2ecc71";
+                    ctx.beginPath(); ctx.arc(center + (xDist * scale), center - (yDist * scale), 5, 0, Math.PI * 2); ctx.fill();
+                }
+            });
+
+            gostations.sort((a, b) => a.d - b.d);
+            document.getElementById('list-body').innerHTML = gostations.slice(0, 10).map(s => `<tr><td>${s.name}</td><td>${Math.round(s.d)}m</td></tr>`).join('');
+            if (gostations[0].d < spacing) speak("Approaching Go Station");
+        }
+
+        function updateGPSUI(acc) {
+            const ui = document.getElementById('gps-ui');
+            ui.className = "gps-status " + (acc < 25 ? 'lvl4' : 'lvl3');
+        }
+
+        function speak(t) { window.speechSynthesis.speak(new SpeechSynthesisUtterance(t)); }
+        
+        function handleCSV(input) {
+            const r = new FileReader();
+            r.onload = (e) => {
+                const lines = e.target.result.split(/\r?\n/);
+                let temp = [];
+                for (let i = 1; i < lines.length; i++) {
+                    const p = lines[i].split(',');
+                    if (p.length >= 3) temp.push({ name: p[0].replace(/"/g, '').trim(), lat: parseFloat(p[1]), lon: parseFloat(p[2]) });
+                }
+                gostations = temp;
+                localStorage.setItem('gostation_db_v18', JSON.stringify(temp));
+                updateBufferUI(temp.length, temp.length);
+                location.reload();
+            };
+            r.readAsText(input.files[0]);
+        }
+        function exportCSV() {
+            let c = "Name,Lat,Lon\n" + gostations.map(s => `"${s.name}",${s.lat},${s.lon}`).join("\n");
+            const b = new Blob([c], {type: 'text/csv'});
+            const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'gostations.csv'; a.click();
+        }
+        function clearAll() { localStorage.clear(); location.reload(); }
+    </script>
+</body>
+</html>
