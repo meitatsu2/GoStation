@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoStation Radar v23.5</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * { font-size: 14pt; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #121212; color: white; margin: 0; padding: 0; display: flex; flex-direction: column; min-height: 100vh; }
+        .title-ribbon { background: #1abc9c; color: #000; height: 35px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11pt; }
+        .ribbon { background: #2c3e50; height: 105px; display: flex; align-items: center; padding: 0 12px; border-bottom: 2px solid #34495e; }
+        .menu-item { position: relative; }
+        .menu-btn { background: none; border: none; color: white; padding: 10px; cursor: pointer; }
+        .dropdown { display: none; position: absolute; background: white; min-width: 320px; z-index: 100; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        .dropdown button { color: black; padding: 15px; width: 100%; text-align: left; border: none; background: none; border-bottom: 1px solid #ddd; cursor: pointer; }
+        .menu-item:hover .dropdown { display: block; }
+        .stats-monitor { margin-left: 10px; flex-grow: 1; display: flex; flex-direction: column; justify-content: center; height: 100%; }
+        .row-green { color: #2ecc71; font-size: 11pt; line-height: 1.3; font-weight: bold; font-family: monospace; }
+        .row-red { color: #e74c3c; font-size: 11pt; line-height: 1.3; font-weight: bold; font-family: monospace; }
+        .control-aside { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; min-width: 90px; height: 100%; }
+        #btnPause { background: #f39c12; color: white; border: none; padding: 6px 10px; border-radius: 4px; display: none; margin-top: 8px; font-size: 10pt; font-weight: bold; }
+        .gps-status { display: flex; align-items: flex-end; gap: 3px; height: 16px; margin-bottom: 2px; }
+        .bar { width: 4px; background: #555; border-radius: 1px; }
+        .lvl4 .bar { background: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
+        #radar-container { background: #000; position: relative; text-align: center; padding: 10px 0; border-bottom: 1px solid #333; }
+        #radarCanvas { background: #000; border: 1px solid #333; }
+        .hud-label { position: absolute; font-family: monospace; font-weight: bold; font-size: 11pt; pointer-events: none; }
+        #scale-indicator { top: 15px; left: 15px; text-align: left; color: #fff; }
+        #north-indicator { top: 10px; width: 100%; left: 0; text-align: center; color: #2ecc71; font-size: 21pt; font-weight: 900; }
+        #accuracy-display { background: #000; color: #f1c40f; text-align: center; font-size: 10pt; padding: 5px 0; display: none; }
+        .range-panel { background: #1a1a1a; padding: 15px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #333; gap: 20px; }
+        .range-btn { background: #2c3e50; color: white; border: solid 1px #34495e; width: 50px; height: 50px; border-radius: 5px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 18pt; font-weight: bold; }
+        #range-display { min-width: 120px; text-align: center; font-weight: bold; color: #1abc9c; }
+        .controls { background: #1a1a1a; padding: 15px; display: flex; gap: 10px; }
+        .btn { padding: 12px; border-radius: 6px; border: none; font-weight: bold; flex: 1; cursor: pointer; }
+        #btnGo { background: #34495e; color: #7f8c8d; }
+        #btnStop { background: #c0392b; color: white; display: none; }
+        .ready { background: #2ecc71 !important; color: black !important; }
+        .main-content { flex: 1; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 10px; border-bottom: 1px solid #333; text-align: left; }
+        .footer { background: #111; padding: 15px; text-align: center; border-top: 1px solid #333; font-size: 10pt; color: #888; line-height: 1.4; }
+    </style>
+</head>
+<body>
+    <div class="title-ribbon">GoStation Radar v23.5</div>
+    <div class="ribbon">
+        <div class="menu-item">
+            <button class="menu-btn">File ☰</button>
+            <div class="dropdown">
+                <button onclick="document.getElementById('xlsxIn').click()">Import XLSX Address List</button>
+                <button onclick="document.getElementById('csvIn').click()">Import Processed Buffer (CSV)</button>
+                <button onclick="exportCSV()">Export Processed Buffer (CSV)</button>
+                <button onclick="exportFailures()">Export Failure Log (CSV)</button>
+                <button onclick="clearAll()">Reset System</button>
+            </div>
+        </div>
+        <div class="stats-monitor">
+            <div class="row-green">SCAN: <span id="scan-val">0</span> / <span id="total-val">0</span></div>
+            <div class="row-green">BUFF: <span id="buff-val">0</span></div>
+            <div class="row-red">FAIL: <span id="fail-val">0</span></div>
+        </div>
+        <div class="control-aside">
+            <div id="gps-ui" class="gps-status"><div class="bar bar1"></div><div class="bar bar2"></div><div class="bar bar3"></div><div class="bar bar4"></div></div>
+            <button id="btnPause" onclick="togglePause()">PAUSE</button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div id="radar-container">
+            <div id="scale-indicator" class="hud-label">STEP: --m</div>
+            <div id="north-indicator" class="hud-label">N</div>
+            <canvas id="radarCanvas" width="320" height="320"></canvas>
+        </div>
+        <div id="accuracy-display">GPS Accuracy: ±--m</div>
+        <div class="range-panel">
+            <button class="range-btn" onclick="changeRange(-1)">◀</button>
+            <div id="range-display">5 km</div>
+            <button class="range-btn" onclick="changeRange(1)">▶</button>
+        </div>
+        <div class="controls">
+            <button id="btnGo" class="btn" onclick="startTracking()">GO</button>
+            <button id="btnStop" class="btn" onclick="stopTracking()">STOP</button>
+        </div>
+        <table>
+            <thead><tr><th>Name</th><th>Distance</th></tr></thead>
+            <tbody id="list-body"></tbody>
+        </table>
+    </div>
+
+    <div class="footer">Produced by Adam M.T. Chen<br>Feb.-2026 / All rights reserved</div>
+    
+    <input type="file" id="xlsxIn" hidden accept=".xlsx" onchange="handleXLSX(this)">
+    <input type="file" id="csvIn" hidden accept=".csv, text/csv" onchange="handleCSV(this)">
+
+    <script>
+        const GOOGLE_API_KEY = 'AIzaSyBj5kVNaZDumMfHTI16y8UA5-50_WqrfnE';
+        const RANGES = [500, 1000, 2000, 3000, 5000, 10000, 15000, 20000];
+        let currentRangeIdx = 4;
+        let buffer = [], failedLog = [], isPaused = false, resumeIndex = 1;
+        let currentRows = [], currentIndices = {};
+        let gpsHistory = [], lastArrowAngle = 0, myPos = null, watchID = null;
+        const canvas = document.getElementById('radarCanvas');
+        const ctx = canvas.getContext('2d');
+
+        window.onload = () => {
+            const saved = localStorage.getItem('gostation_radar_buffer_v23_5');
+            if (saved) { 
+                buffer = JSON.parse(saved); 
+                document.getElementById('btnGo').classList.add('ready'); 
+                updateStats(buffer.length, 0, buffer.length, 0); 
+            }
+            updateRangeUI();
+            drawRadarFrame();
+        };
+
+        function changeRange(dir) {
+            let nextIdx = currentRangeIdx + dir;
+            if (nextIdx >= 0 && nextIdx < RANGES.length) {
+                currentRangeIdx = nextIdx;
+                updateRangeUI();
+                drawRadarFrame();
+                if (watchID) processFrame(); 
+            }
+        }
+
+        function updateRangeUI() {
+            let val = RANGES[currentRangeIdx];
+            document.getElementById('range-display').innerText = val >= 1000 ? (val/1000) + " km" : val + " m";
+        }
+
+        function updateStats(s, t, b, f) {
+            document.getElementById('scan-val').innerText = s;
+            document.getElementById('total-val').innerText = t;
+            document.getElementById('buff-val').innerText = b;
+            document.getElementById('fail-val').innerText = f;
+        }
+
+        async function handleXLSX(input) {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const data = new Uint8Array(e.target.result);
+                const wb = XLSX.read(data, {type: 'array'});
+                currentRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1});
+                const headers = currentRows[0].map(h => String(h).trim());
+                currentIndices.name = headers.indexOf('站點名稱');
+                currentIndices.addr = headers.indexOf('地址');
+                resumeIndex = 1; failedLog = []; isPaused = false;
+                document.getElementById('btnPause').style.display = 'block';
+                processRows();
+            };
+            reader.readAsArrayBuffer(input.files[0]);
+        }
+
+        async function processRows() {
+            const total = currentRows.length - 1;
+            for (let i = resumeIndex; i < currentRows.length; i++) {
+                if (isPaused) { resumeIndex = i; return; }
+                
+                let rawName = currentRows[i][currentIndices.name] !== undefined ? String(currentRows[i][currentIndices.name]) : "";
+                let rawAddr = currentRows[i][currentIndices.addr] !== undefined ? String(currentRows[i][currentIndices.addr]) : "";
+                
+                if (!rawName || !rawAddr) continue;
+
+                // Requirement 1: Unconditionally remove the last character
+                let Name1 = rawName.slice(0, -1);
+                
+                if (buffer.some(s => s.Name1 === Name1)) { continue; }
+
+                let Remark1 = "", Remark2 = "";
+                const bracketMatches = rawAddr.match(/[（(].*?[）)]/g);
+                if (bracketMatches) {
+                    bracketMatches.forEach(m => {
+                        let inner = m.slice(1, -1).replace(/^近/, "");
+                        if (inner.includes('/') || inner.includes('與')) {
+                            let splitChar = inner.includes('/') ? '/' : '與';
+                            let parts = inner.split(splitChar);
+                            Remark1 = parts[0].trim();
+                            let right = parts[1].trim();
+                            let laneIdx = right.indexOf('巷');
+                            if (laneIdx !== -1) Remark2 = right.substring(0, laneIdx + 1);
+                            else {
+                                let roadIdx = right.search(/[路街]/);
+                                if (roadIdx !== -1) Remark2 = right.substring(0, roadIdx + 1);
+                            }
+                        } else {
+                            Remark1 = inner.includes('站') ? inner.substring(0, inner.indexOf('站') + 1) : inner;
+                        }
+                    });
+                }
+
+                let Address1 = rawAddr.replace(/[（(].*?[）)]/g, "").replace(/臺/g, "台");
+                if (Address1.includes("鎮") || Address1.includes("區")) Address1 = Address1.replace(/([鎮區])([^鎮區]{1,5}里)/g, "$1");
+                else if (Address1.includes("市") && !Address1.includes("區")) Address1 = Address1.replace(/(市)([^市]{1,5}里)/g, "$1");
+                Address1 = Address1.replace(/([鄉鎮市區里村])(\d+鄰)/g, "$1");
+                Address1 = Address1.replace(/[之\-旁對面、，底].*/, "");
+                let houseIdx = Address1.indexOf('號');
+                if (houseIdx !== -1) Address1 = Address1.substring(0, houseIdx + 1);
+                Address1 = Address1.trim();
+
+                let Lat = null, Lon = null;
+                if (Address1.includes('號')) {
+                    let res = await googleGeocode(Address1);
+                    if (res) { Lat = res.lat; Lon = res.lng; }
+                }
+                if (!Lat && Remark1 && Remark2) {
+                    let res = await googleGeocode(Remark1 + " " + Remark2);
+                    if (res) { Lat = res.lat; Lon = res.lng; }
+                }
+                if (!Lat && Remark1 && !Remark2) {
+                    let res = await googleGeocode(Remark1);
+                    if (res) { Lat = res.lat; Lon = res.lng; }
+                }
+                if (!Lat) {
+                    let res = await googleGeocode(Name1);
+                    if (res) { Lat = res.lat; Lon = res.lng; }
+                }
+
+                if (Lat && Lon) {
+                    buffer.push({ Name1, Address1, Remark1, Remark2, Lat, Lon });
+                    localStorage.setItem('gostation_radar_buffer_v23_5', JSON.stringify(buffer));
+                } else {
+                    failedLog.push({ Name1, Address1, Remark1, Remark2, Lat: "", Lon: "" });
+                }
+
+                updateStats(buffer.length + failedLog.length, total, buffer.length, failedLog.length);
+                await new Promise(r => setTimeout(r, 200)); 
+            }
+            document.getElementById('btnPause').style.display = 'none';
+        }
+
+        async function googleGeocode(q) {
+            try {
+                const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&key=${GOOGLE_API_KEY}&language=zh-TW`;
+                const r = await fetch(url);
+                const d = await r.json();
+                if (d.status === 'OK') return d.results[0].geometry.location;
+                return null;
+            } catch (e) { return null; }
+        }
+
+        function drawRadarFrame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const center = canvas.width/2, range = RANGES[currentRangeIdx], spacing = range / 5;
+            document.getElementById('scale-indicator').innerText = `STEP: ${spacing}m`;
+            ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1;
+            for(let i=1; i<=5; i++) { ctx.beginPath(); ctx.arc(center, center, (center/5)*i, 0, Math.PI*2); ctx.stroke(); }
+            ctx.beginPath(); ctx.moveTo(center, 0); ctx.lineTo(center, canvas.height); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, center); ctx.lineTo(canvas.width, center); ctx.stroke();
+            calculateAndDrawVector(center, spacing);
+        }
+
+        function calculateAndDrawVector(center, spacing) {
+            if (gpsHistory.length < 7) { drawArrow(center, lastArrowAngle, 0, spacing); return; }
+            const getAvgPos = (o) => {
+                let sumLat = 0, sumLon = 0, start = gpsHistory.length - 4 + o, subset = gpsHistory.slice(start, start + 4);
+                subset.forEach(p => { sumLat += p.lat; sumLon += p.lon; });
+                return { lat: sumLat / 4, lon: sumLon / 4 };
+            };
+            const L0 = getAvgPos(0), L_1 = getAvgPos(-1), L_2 = getAvgPos(-2), L_3 = getAvgPos(-3);
+            const vec = (pA, pB) => {
+                const dy = (pA.lat - pB.lat) * 110540, dx = (pA.lon - pB.lon) * 111320 * Math.cos(pA.lat * Math.PI / 180);
+                return { amp: Math.sqrt(dx*dx + dy*dy), angle: Math.atan2(dx, dy) };
+            };
+            const V0 = vec(L0, L_1), V_1 = vec(L0, L_2), V_2 = vec(L0, L_3);
+            let chosenAngle = lastArrowAngle;
+            if (V0.amp > 20) chosenAngle = V0.angle; else if (V_1.amp > 19) chosenAngle = V_1.angle; else if (V_2.amp > 18) chosenAngle = V_2.angle;
+            lastArrowAngle = chosenAngle;
+            drawArrow(center, chosenAngle, V_1.amp, spacing);
+        }
+
+        function drawArrow(center, angle, amp, spacing) {
+            ctx.save(); ctx.translate(center, center); ctx.rotate(angle);
+            ctx.fillStyle = ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(5, 10); ctx.lineTo(-5, 10); ctx.closePath(); ctx.fill();
+            const tailLength = (amp / 30) * (center / 5);
+            if (tailLength > 0) { ctx.beginPath(); ctx.moveTo(0, 10); ctx.lineTo(0, 10 + tailLength); ctx.stroke(); }
+            ctx.restore();
+        }
+
+        async function startTracking() {
+            if (!buffer.length) return;
+            document.getElementById('btnGo').style.display = 'none';
+            document.getElementById('btnStop').style.display = 'block';
+            document.getElementById('accuracy-display').style.display = 'block';
+            watchID = setInterval(() => {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    myPos = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+                    gpsHistory.push(myPos); if (gpsHistory.length > 30) gpsHistory.shift();
+                    document.getElementById('accuracy-display').innerText = `GPS Accuracy: ±${Math.round(pos.coords.accuracy)}m`;
+                    document.getElementById('gps-ui').className = "gps-status " + (pos.coords.accuracy < 25 ? 'lvl4' : 'lvl3');
+                    processFrame();
+                }, null, { enableHighAccuracy: true });
+            }, 3000);
+        }
+
+        function stopTracking() {
+            if (watchID) clearInterval(watchID);
+            document.getElementById('btnGo').style.display = 'block';
+            document.getElementById('btnStop').style.display = 'none';
+            document.getElementById('accuracy-display').style.display = 'none';
+            gpsHistory = []; drawRadarFrame();
+        }
+
+        function processFrame() {
+            if (!myPos) return; drawRadarFrame();
+            const range = RANGES[currentRangeIdx], center = canvas.width / 2, scale = center / range;
+            buffer.forEach(s => {
+                const dy = (s.Lat - myPos.lat) * 110540, dx = (s.Lon - myPos.lon) * 111320 * Math.cos(myPos.lat * Math.PI / 180);
+                s.d = Math.sqrt(dx*dx + dy*dy);
+                if (s.d <= range) { ctx.fillStyle = "#2ecc71"; ctx.beginPath(); ctx.arc(center + (dx * scale), center + (dy * -scale), 5, 0, Math.PI * 2); ctx.fill(); }
+            });
+            buffer.sort((a, b) => a.d - b.d);
+            document.getElementById('list-body').innerHTML = buffer.slice(0, 10).map(s => `<tr><td>${s.Name1}</td><td>${Math.round(s.d)}m</td></tr>`).join('');
+            
+            if (buffer[0].d < (range/5)) {
+                let name = buffer[0].Name1;
+                let engWords = name.match(/^[a-zA-Z]+/g);
+                if (engWords) {
+                    let words = name.split(/\s+/).filter(w => /^[a-zA-Z]+$/.test(w));
+                    if (words.length > 0) {
+                        let toRead = words.slice(0, 2).join(" ");
+                        speak("Approaching " + toRead);
+                    } else {
+                        speak("Approaching Go Station");
+                    }
+                } else {
+                    speak("Approaching Go Station");
+                }
+            }
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            const btn = document.getElementById('btnPause');
+            btn.innerText = isPaused ? "RESUME" : "PAUSE";
+            btn.style.background = isPaused ? "#2ecc71" : "#f39c12";
+            if (!isPaused) processRows();
+        }
+
+        function exportFailures() {
+            if (failedLog.length === 0) return alert("No failures recorded.");
+            let csv = "\uFEFFName1,Address1,Remark1,Remark2,Lat,Lon\n" + failedLog.map(f => `"${f.Name1}","${f.Address1}","${f.Remark1}","${f.Remark2}","",""`).join("\n");
+            const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = 'GoStation_FailLog.csv'; a.click();
+        }
+
+        function exportCSV() {
+            let csv = "\uFEFFName1,Address1,Remark1,Remark2,Lat,Lon\n" + buffer.map(s => `"${s.Name1}","${s.Address1}","${s.Remark1}","${s.Remark2}",${s.Lat},${s.Lon}`).join("\n");
+            const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = 'GoStation_Buffer.csv'; a.click();
+        }
+
+        function handleCSV(input) {
+            const r = new FileReader(); r.onload = (e) => {
+                const lines = e.target.result.split(/\r?\n/);
+                buffer = lines.slice(1).map(l => {
+                    const p = l.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                    if (p.length >= 6) return { 
+                        Name1: p[0].replace(/"/g,''), Address1: p[1].replace(/"/g,''), 
+                        Remark1: p[2].replace(/"/g,''), Remark2: p[3].replace(/"/g,''), 
+                        Lat: parseFloat(p[4]), Lon: parseFloat(p[5]) 
+                    };
+                    return null;
+                }).filter(o => o);
+                localStorage.setItem('gostation_radar_buffer_v23_5', JSON.stringify(buffer)); location.reload();
+            }; r.readAsText(input.files[0]);
+        }
+
+        function clearAll() { localStorage.clear(); location.reload(); }
+        function speak(txt) { 
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(txt)); 
+        }
+    </script>
+</body>
+</html>
