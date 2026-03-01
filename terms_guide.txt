@@ -1,0 +1,39 @@
+GoStation Radar使用說明及規約：
+1.	本網站程式為依據公開網站資訊Web-bridge方式取得換電站位置資訊，製作之Gogoro換電站雷達，僅供個人參考使用。該資訊由營運方提供，不提供即時更新。
+2.	請您(使用者)遵守駕駛(騎乘)法規及相關義務使用本網站程式，自行負責駕駛安全義務。
+3.	本網站程式所有者儘量依可獲得公開資訊，提供可用資訊協助使用者提升便利性，但不保證相關資訊精確。例如因為資訊未即時更新，導致您依本程式到達的站點無服務、在服務時間外或無滿電電池等。
+4.	任何人主張因本程式導致任何損失或事故，本網站程式所有者及相關人士不負任何責任。
+5.	本程式的設計目的：
+5.1	不想總是要事先用換電地圖規劃途中路線每個換電站，想騎GOGORO隨意出發遠行。
+5.2	當您要遠行至不熟悉地點，傳統加油車輛無須事先規劃沿途加油站點，只要使用導航，設定停留點或終點，即可選擇您偏好的路線。途中如有需要加油，因加油站大而明顯，您可隨意臨時決定加油。然而換電車需要事先規劃路線，目前的官方工具在路程規劃需要做功課，無法如傳統油車隨時隨意出發。
+5.3	換電站不明顯，稍不留意就容易錯過。
+5.4	使用本程式GoStation Radar可即時在雷達幕上顯示最高半徑20公里範圍的換電站。您只要確定您前往的目的地途中有換電站即可，無須詳細規劃即可出發。例如，您只要知道換電機車無法穿越 “北橫/中橫/南橫” 及一些深山。使用本雷達即可知道直線距離20公里範圍有無換電站，並參考車上儀表顯示剩餘電量，即可決定是否可到達。
+6.	程式使用說明：
+6.1	本程式在網頁中執行，依您手機設定，隨時會進入休眠狀態而停止運行。因此建議方式為搭配Google Map於導航模式的浮動視窗，可使不進入休眠。
+6.2	雷達幕指示方向：上方朝北。中間箭頭指向您的行進方向，該箭頭與車頭或手機方位無關。如果您靜止，理論上該箭頭應該保持之前最後行進方向。但當您靜止或速度低於步行，可能因為GPS定位精度問題而使箭頭方向不穩定跳動。
+6.3	雷達幕下方有範圍選擇，依您所在換電站密度選擇適合範圍。例如在偏遠換電站密度低的地區，您可選擇大半徑。當接近換電站前可縮小半徑，獲得較精確相對位置。
+6.4	雷達幕顯示距離環，從圓心到最大範圍分成5等分，相鄰環的距離顯示在左上角 “STEP”。
+6.5	你的行進速度顯示在圓心箭頭後的箭桿長度。一個STEP長度表示GPS速度18 KPH. (依作者個人車況，錶速大於GPS速度10%以上)
+6.6	請注意路況，勿分心看手機。重申您駕駛的安全義務。
+6.7	請注意雷達顯示的是直線距離，而非車子旅程距離，需要您自行判斷，不可完全依賴雷達資訊。
+7.	若您開始使用本程式即視同您同意上述規約，並了解相關注意事項。
+
+GoStation Radar User Guidelines and Terms:
+1. This website program is based on the open sourced GoStation Location data and is a Gogoro battery swapping station radar for personal reference only. This information is provided by the operator and is not updated in real time.
+2. Please comply with driving (riding) regulations and related obligations when using this website program, and be responsible for your own driving safety.
+3. The website program owner strives to provide usable information based on publicly available information to help improve user convenience, but does not guarantee the accuracy of the information. For example, due to information not being updated in real time, the station you arrive at using this program may have no service, be outside service hours, or have no fully charged battery.
+4. The website owner and related parties shall not be liable for any loss or accident caused by this program.
+5. The purpose of this program:
+5.1 For those who don't want to always plan their route and visit every battery swapping station in advance using a battery swapping map, and want to freely set off on long-distance trips on GOGORO.
+5.2 When you are traveling to an unfamiliar location, traditional refueling vehicles do not require prior planning of refueling stations along the way. Simply use navigation, set your stop points or destination, and choose your preferred route. If you need to refuel along the way, gas stations are large and obvious, allowing you to decide to refuel on the spot. However, battery swapping vehicles require prior route planning. Current official tools require some effort in route planning, unlike traditional refueling vehicles which allow for spontaneous departures.
+5.3 Battery swapping stations are not easily noticeable and can be easily missed.
+5.4 Using this program, GoStation Radar, you can instantly display battery swapping stations within a radius of up to 20 kilometers on the radar screen. You only need to ensure there is a battery swapping station along your route; no detailed planning is required before setting off. For example, if you know that electric bike swapping vehicles cannot traverse the Northern/Central/Southern Cross-Island Highways and some remote mountainous areas, this radar can determine if there are battery swapping stations within a 20km straight-line distance. By referring to the remaining battery power displayed on your vehicle's dashboard, you can decide whether you can reach the station.
+6. Program Usage Instructions:
+6.1 This program runs in a web browser and may enter sleep mode and stop operating at any time depending on your phone's settings. Therefore, it is recommended to use it in conjunction with Google Maps in navigation mode (floating window) to prevent it from entering sleep mode.
+6.2 Radar screen direction indicator: North at the top. The middle arrow points in your direction of travel, regardless of the vehicle's or phone's orientation. If you are stationary, theoretically, the arrow should maintain the direction of your last movement. However, when you are stationary or traveling at a speed slower than walking, the arrow direction may fluctuate due to GPS positioning accuracy issues.
+6.3 There is a range selection option at the bottom of the radar screen. Choose a suitable range based on the density of battery swapping stations in your area. For example, in remote areas with low battery swapping station density, you can choose a larger radius. As you approach a battery swapping station, you can reduce the radius to obtain a more accurate relative position.
+6.4 The radar screen displays a distance ring, divided into 5 equal parts from the center to the maximum range. The distance between adjacent rings is displayed in the upper left corner under "STEP".
+6.5 Your driving speed is displayed as the length of the arrow behind the central arrow. One STEP represents 18 KPH (based on the author's personal vehicle conditions, the speedometer speed is more than 10% higher than the GPS speed).
+6.6 Please pay attention to road conditions and do not be distracted by your phone. We reiterate your responsibility for safe driving.
+6.7 Please note that the radar displays straight-line distance, not the vehicle's travel distance. You must judge this yourself and do not rely solely on radar information.
+7. By using this program, you agree to the above terms and conditions and understand the relevant precautions.
