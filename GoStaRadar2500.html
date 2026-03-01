@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoStation Radar v25.0</title>
+    <style>
+        * { font-size: 14pt; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #121212; color: white; margin: 0; padding: 0; display: flex; flex-direction: column; min-height: 100vh; }
+        .title-ribbon { background: #1abc9c; color: #000; height: 35px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11pt; }
+        
+        .ribbon { background: #2c3e50; height: 105px; display: flex; align-items: center; padding: 0 12px; border-bottom: 2px solid #34495e; }
+        
+        /* New Agreement Button & Sync Display */
+        #btnAgreement { background: #e67e22; color: white; border: none; padding: 12px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .sync-monitor { margin-left: 15px; flex-grow: 1; color: #2ecc71; font-family: monospace; font-weight: bold; font-size: 12pt; }
+
+        /* Modal for Terms */
+        #termsModal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); }
+        .modal-content { background: #fff; color: #000; margin: 10% auto; padding: 20px; width: 85%; max-height: 70%; overflow-y: auto; border-radius: 8px; }
+        .modal-btns { display: flex; gap: 10px; margin-top: 20px; }
+        .modal-btns button { flex: 1; padding: 12px; border: none; font-weight: bold; cursor: pointer; border-radius: 5px; }
+        #btnAccept { background: #2ecc71; color: white; }
+        #btnReject { background: #e74c3c; color: white; }
+
+        #radar-container { background: #000; position: relative; text-align: center; padding: 10px 0; border-bottom: 1px solid #333; }
+        #radarCanvas { background: #000; border: 1px solid #333; }
+        .hud-label { position: absolute; font-family: monospace; font-weight: bold; font-size: 11pt; pointer-events: none; }
+        #scale-indicator { top: 15px; left: 15px; text-align: left; color: #fff; }
+        #north-indicator { top: 10px; width: 100%; left: 0; text-align: center; color: #2ecc71; font-size: 21pt; font-weight: 900; }
+        #accuracy-display { background: #000; color: #f1c40f; text-align: center; font-size: 10pt; padding: 5px 0; display: none; }
+        
+        .range-panel { background: #1a1a1a; padding: 15px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #333; gap: 20px; }
+        .range-btn { background: #2c3e50; color: white; border: solid 1px #34495e; width: 50px; height: 50px; border-radius: 5px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 18pt; font-weight: bold; }
+        #range-display { min-width: 120px; text-align: center; font-weight: bold; color: #1abc9c; }
+        
+        .controls { background: #1a1a1a; padding: 15px; display: flex; gap: 10px; }
+        .btn { padding: 12px; border-radius: 6px; border: none; font-weight: bold; flex: 1; cursor: pointer; }
+        #btnGo { background: #34495e; color: #7f8c8d; }
+        #btnStop { background: #c0392b; color: white; display: none; }
+        .ready { background: #2ecc71 !important; color: #000 !important; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 10px; border-bottom: 1px solid #333; text-align: left; }
+        .footer { background: #111; padding: 15px; text-align: center; border-top: 1px solid #333; font-size: 10pt; color: #888; line-height: 1.4; }
+    </style>
+</head>
+<body>
+    <div class="title-ribbon">GoStation Radar v25.0</div>
+    
+    <div class="ribbon">
+        <button id="btnAgreement" onclick="openTerms()">Agreement before use</button>
+        <div class="sync-monitor">SYNC: <span id="sync-val">0</span> STATIONS</div>
+    </div>
+
+    <div id="termsModal">
+        <div class="modal-content">
+            <div id="termsText">Loading terms...</div>
+            <div class="modal-btns">
+                <button id="btnAccept" onclick="handleAccept()">ACCEPT</button>
+                <button id="btnReject" onclick="handleReject()">REJECT</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div id="radar-container">
+            <div id="scale-indicator" class="hud-label">STEP: --m</div>
+            <div id="north-indicator" class="hud-label">N</div>
+            <canvas id="radarCanvas" width="320" height="320"></canvas>
+        </div>
+        <div id="accuracy-display">GPS Accuracy: ±--m</div>
+        <div class="range-panel">
+            <button class="range-btn" onclick="changeRange(-1)">◀</button>
+            <div id="range-display">5 km</div>
+            <button class="range-btn" onclick="changeRange(1)">▶</button>
+        </div>
+        <div class="controls">
+            <button id="btnGo" class="btn" onclick="startTracking()">GO</button>
+            <button id="btnStop" class="btn" onclick="stopTracking()">STOP</button>
+        </div>
+        <table>
+            <thead><tr><th>Name</th><th>Distance</th></tr></thead>
+            <tbody id="list-body"></tbody>
+        </table>
+    </div>
+
+    <div class="footer">Produced by Adam M.T. Chen<br>Feb.-2026 / All rights reserved</div>
+
+    <script>
+        // Internal Data Structure: Name, Lat, Lon
+        let buffer = [], gpsHistory = [], lastArrowAngle = 0, myPos = null, watchID = null;
+        const RANGES = [500, 1000, 2000, 3000, 5000, 10000, 15000, 20000];
+        let currentRangeIdx = 4;
+        const canvas = document.getElementById('radarCanvas');
+        const ctx = canvas.getContext('2d');
+
+        window.onload = () => {
+            const saved = localStorage.getItem('gostation_radar_buffer_v25_0');
+            if (saved) {
+                buffer = JSON.parse(saved);
+                document.getElementById('sync-val').innerText = buffer.length;
+                document.getElementById('btnGo').classList.add('ready');
+            }
+            updateRangeUI(); drawRadarFrame();
+        };
+
+        // --- Requirement 2: Terms Loading ---
+        async function openTerms() {
+            try {
+                const response = await fetch('terms_guide.txt');
+                const text = await response.text();
+                document.getElementById('termsText').innerText = text;
+            } catch (e) {
+                document.getElementById('termsText').innerText = "Error loading terms_guide.txt. Please ensure the file exists in the index.html path.";
+            }
+            document.getElementById('termsModal').style.display = 'block';
+        }
+
+        function handleReject() {
+            document.getElementById('termsModal').style.display = 'none';
+        }
+
+        // --- Requirement 4: Web-Bridge Sync ---
+        async function handleAccept() {
+            document.getElementById('termsModal').style.display = 'none';
+            document.getElementById('sync-val').innerText = "SYNCING...";
+            
+            try {
+                // Fetch official data via proxy/direct endpoint
+                // Note: In a production environment, this points to Gogoro's JSON data list.
+                const response = await fetch('https://raw.githubusercontent.com/gogoro-network/station-data/master/stations.json'); 
+                const data = await response.json();
+                
+                buffer = data.map(item => ({
+                    Name: item.LocName.zh_TW || item.LocName.en_US,
+                    Lat: item.Latitude,
+                    Lon: item.Longitude
+                }));
+
+                localStorage.setItem('gostation_radar_buffer_v25_0', JSON.stringify(buffer));
+                document.getElementById('sync-val').innerText = buffer.length;
+                document.getElementById('btnGo').classList.add('ready');
+                alert("Auto-Sync Complete. " + buffer.length + " stations imported.");
+            } catch (error) {
+                document.getElementById('sync-val').innerText = "ERROR";
+                alert("Failed to connect to Web-Bridge. Please check your internet connection.");
+            }
+        }
+
+        function drawRadarFrame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const center = canvas.width/2, range = RANGES[currentRangeIdx], spacing = range / 5;
+            document.getElementById('scale-indicator').innerText = `STEP: ${spacing}m`;
+            ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1;
+            for(let i=1; i<=5; i++) { ctx.beginPath(); ctx.arc(center, center, (center/5)*i, 0, Math.PI*2); ctx.stroke(); }
+            ctx.beginPath(); ctx.moveTo(center, 0); ctx.lineTo(center, canvas.height); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, center); ctx.lineTo(canvas.width, center); ctx.stroke();
+            calculateAndDrawVector(center, spacing);
+        }
+
+        function calculateAndDrawVector(center, spacing) {
+            if (gpsHistory.length < 7) { drawArrow(center, lastArrowAngle, 0, spacing); return; }
+            const getAvgPos = (o) => {
+                let sumLat = 0, sumLon = 0, start = gpsHistory.length - 4 + o, subset = gpsHistory.slice(start, start + 4);
+                subset.forEach(p => { sumLat += p.lat; sumLon += p.lon; });
+                return { lat: sumLat / 4, lon: sumLon / 4 };
+            };
+            const L0 = getAvgPos(0), L_1 = getAvgPos(-1), L_2 = getAvgPos(-2), L_3 = getAvgPos(-3);
+            const vec = (pA, pB) => {
+                const dy = (pA.lat - pB.lat) * 110540, dx = (pA.lon - pB.lon) * 111320 * Math.cos(pA.lat * Math.PI / 180);
+                return { amp: Math.sqrt(dx*dx + dy*dy), angle: Math.atan2(dx, dy) };
+            };
+            const V0 = vec(L0, L_1), V_1 = vec(L0, L_2), V_2 = vec(L0, L_3);
+            let chosenAngle = lastArrowAngle;
+            if (V0.amp > 20) chosenAngle = V0.angle; else if (V_1.amp > 19) chosenAngle = V_1.angle; else if (V_2.amp > 18) chosenAngle = V_2.angle;
+            lastArrowAngle = chosenAngle;
+            drawArrow(center, chosenAngle, V_1.amp, spacing);
+        }
+
+        function drawArrow(center, angle, amp, spacing) {
+            ctx.save(); ctx.translate(center, center); ctx.rotate(angle);
+            ctx.fillStyle = ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(5, 10); ctx.lineTo(-5, 10); ctx.closePath(); ctx.fill();
+            const tailLength = (amp / 30) * (center / 5);
+            if (tailLength > 0) { ctx.beginPath(); ctx.moveTo(0, 10); ctx.lineTo(0, 10 + tailLength); ctx.stroke(); }
+            ctx.restore();
+        }
+
+        async function startTracking() {
+            if (!buffer.length) return;
+            document.getElementById('btnGo').style.display = 'none';
+            document.getElementById('btnStop').style.display = 'block';
+            document.getElementById('accuracy-display').style.display = 'block';
+            watchID = setInterval(() => {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    myPos = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+                    gpsHistory.push(myPos); if (gpsHistory.length > 30) gpsHistory.shift();
+                    document.getElementById('accuracy-display').innerText = `GPS Accuracy: ±${Math.round(pos.coords.accuracy)}m`;
+                    processFrame();
+                }, null, { enableHighAccuracy: true });
+            }, 3000);
+        }
+
+        function stopTracking() {
+            if (watchID) clearInterval(watchID);
+            document.getElementById('btnGo').style.display = 'block';
+            document.getElementById('btnStop').style.display = 'none';
+            document.getElementById('accuracy-display').style.display = 'none';
+            gpsHistory = []; drawRadarFrame();
+        }
+
+        function processFrame() {
+            if (!myPos) return; drawRadarFrame();
+            const range = RANGES[currentRangeIdx], center = canvas.width / 2, scale = center / range;
+            buffer.forEach(s => {
+                const dy = (s.Lat - myPos.lat) * 110540, dx = (s.Lon - myPos.lon) * 111320 * Math.cos(myPos.lat * Math.PI / 180);
+                s.d = Math.sqrt(dx*dx + dy*dy);
+                if (s.d <= range) { ctx.fillStyle = "#2ecc71"; ctx.beginPath(); ctx.arc(center + (dx * scale), center + (dy * -scale), 5, 0, Math.PI * 2); ctx.fill(); }
+            });
+            buffer.sort((a, b) => a.d - b.d);
+            document.getElementById('list-body').innerHTML = buffer.slice(0, 10).map(s => `<tr><td>${s.Name}</td><td>${Math.round(s.d)}m</td></tr>`).join('');
+            
+            if (buffer[0].d < (range/5)) {
+                let name = buffer[0].Name;
+                if (/^[a-zA-Z0-9]/.test(name)) {
+                    let words = name.split(/[^a-zA-Z0-9]+/).filter(w => w.length > 0);
+                    if (words.length >= 2) speak("Approaching " + words[0] + " " + words[1]);
+                    else if (words.length === 1) speak("Approaching " + words[0]);
+                    else speak("Approaching Go Station");
+                } else speak("Approaching Go Station");
+            }
+        }
+
+        function changeRange(dir) {
+            let nextIdx = currentRangeIdx + dir;
+            if (nextIdx >= 0 && nextIdx < RANGES.length) {
+                currentRangeIdx = nextIdx;
+                updateRangeUI(); drawRadarFrame();
+                if (watchID) processFrame(); 
+            }
+        }
+        function updateRangeUI() {
+            let val = RANGES[currentRangeIdx];
+            document.getElementById('range-display').innerText = val >= 1000 ? (val/1000) + " km" : val + " m";
+        }
+        function speak(txt) { window.speechSynthesis.cancel(); window.speechSynthesis.speak(new SpeechSynthesisUtterance(txt)); }
+        function clearAll() { localStorage.clear(); buffer = []; document.getElementById('sync-val').innerText = "0"; location.reload(); }
+    </script>
+</body>
+</html>
