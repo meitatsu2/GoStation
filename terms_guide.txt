@@ -35,5 +35,5 @@ GoStation Radar User Guidelines and Terms:
 6.4 The radar screen displays a distance ring, divided into 5 equal parts from the center to the maximum range. The distance between adjacent rings is displayed in the upper left corner under "STEP".
 6.5 Your driving speed is displayed as the length of the arrow behind the central arrow. One STEP represents 18 KPH (based on the author's personal vehicle conditions, the speedometer speed is more than 10% higher than the GPS speed).
 6.6 Please pay attention to road conditions and do not be distracted by your phone. We reiterate your responsibility for safe driving.
-6.7 Please note that the radar displays straight-line distance, not the vehicle's travel distance. You must judge this yourself and do not rely solely on radar information.
+6.7 Please note that the radar displays straight-line distance, not the vehicle's travel distance. You must judge this by yourself and do not rely solely on radar information.
 7. By using this program, you agree to the above terms and conditions and understand the relevant precautions.
